@@ -105,16 +105,35 @@ function parseOpenAI(html: string): Model[] {
   for (const km of OPENAI_MODELS) {
     // Escape dots in model IDs for regex
     const escaped = km.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Match the model ID followed by two dollar-amount values
-    const pattern = new RegExp(
-      `${escaped}[^$]{0,120}?\\$(\\d+(?:\\.\\d+)?)[^$]{0,80}?\\$(\\d+(?:\\.\\d+)?)`,
-      "i"
-    );
-    const match = text.match(pattern);
 
-    if (match) {
-      const inputPrice = parseFloat(match[1]);
-      const outputPrice = parseFloat(match[2]);
+    // Find the model name in text
+    const modelRegex = new RegExp(escaped, "i");
+    const modelMatch = text.match(modelRegex);
+    if (!modelMatch || modelMatch.index === undefined) continue;
+
+    // Grab a large window after the model name to reach the Standard tier
+    const afterModel = text.substring(
+      modelMatch.index,
+      modelMatch.index + 1200
+    );
+
+    // OpenAI shows multiple tiers (Batch, Flex, Standard, Priority).
+    // We want Standard tier pricing — the default on-demand rate.
+    const standardIdx = afterModel.search(/\bstandard\b/i);
+    if (standardIdx < 0) continue;
+
+    // From "Standard", grab a window (before the next tier like "Priority")
+    const afterStandard = afterModel.substring(standardIdx, standardIdx + 250);
+    const priceMatches = [...afterStandard.matchAll(/\$([\d.]+)/g)];
+
+    // Expect 3 prices: input, cached input, output — take 1st and 3rd.
+    // If only 2 prices (no cached), take 1st and 2nd.
+    if (priceMatches.length >= 2) {
+      const inputPrice = parseFloat(priceMatches[0][1]);
+      const outputPrice =
+        priceMatches.length >= 3
+          ? parseFloat(priceMatches[2][1])
+          : parseFloat(priceMatches[1][1]);
 
       if (
         !isNaN(inputPrice) &&
