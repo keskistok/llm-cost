@@ -196,16 +196,24 @@ function parseAnthropic(html: string): Model[] {
     const idx = text.search(nameRegex);
     if (idx < 0) continue;
 
-    // Grab a window of text after the model name
-    const window = text.substring(idx, idx + 400);
+    // Limit the window to just this model's row by stopping before the
+    // next "Claude" model name. Without this, the 400-char window bleeds
+    // into subsequent rows and the "last" price match belongs to a
+    // different model.
+    const rest = text.substring(idx + 1);
+    const nextModel = rest.search(/Claude\s+(Opus|Sonnet|Haiku)\s+\d/i);
+    const windowEnd =
+      nextModel >= 0 ? idx + 1 + nextModel : idx + 400;
+    const window = text.substring(idx, windowEnd);
 
-    // Anthropic table format: "$X / MTok" — find all such patterns
+    // Anthropic table format: "$X / MTok" — find all such patterns.
+    // The table columns are: Base Input, 5m Cache, 1h Cache, Cache Hits, Output.
+    // We want the first (Base Input) and last (Output) within this row.
     const priceMatches = [
       ...window.matchAll(/\$([\d.]+)\s*\/?\s*MTok/gi),
     ];
 
     if (priceMatches.length >= 2) {
-      // First = base input, last = output
       const inputPrice = parseFloat(priceMatches[0][1]);
       const outputPrice = parseFloat(priceMatches[priceMatches.length - 1][1]);
 
@@ -265,14 +273,31 @@ function parseGoogle(html: string): Model[] {
     const idx = text.search(nameRegex);
     if (idx < 0) continue;
 
-    const window = text.substring(idx, idx + 300);
+    // Limit window to this model's section (stop at next Gemini model name)
+    const rest = text.substring(idx + 1);
+    const nextModel = rest.search(/Gemini\s+\d/i);
+    const windowEnd = nextModel >= 0 ? idx + 1 + nextModel : idx + 600;
+    let window = text.substring(idx, windowEnd);
 
-    // Google format: "$X.XX" per 1M tokens — find dollar amounts
+    // Exclude batch pricing — only keep the standard/paid section
+    const batchIdx = window.search(/\bbatch\b/i);
+    if (batchIdx > 0) {
+      window = window.substring(0, batchIdx);
+    }
+
+    // Google format: "$X.XX" per 1M tokens — find dollar amounts.
+    // Pro models list 4 prices: input (≤200k), input (>200k),
+    // output (≤200k), output (>200k). Flash models may list 3:
+    // text input, audio input, output.
+    // In both cases, 1st = base input, 3rd = base output.
     const priceMatches = [...window.matchAll(/\$([\d.]+)/g)];
 
     if (priceMatches.length >= 2) {
       const inputPrice = parseFloat(priceMatches[0][1]);
-      const outputPrice = parseFloat(priceMatches[1][1]);
+      const outputPrice =
+        priceMatches.length >= 3
+          ? parseFloat(priceMatches[2][1])
+          : parseFloat(priceMatches[1][1]);
 
       if (!isNaN(inputPrice) && !isNaN(outputPrice) && inputPrice > 0) {
         models.push({
