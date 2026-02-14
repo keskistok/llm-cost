@@ -282,7 +282,7 @@ const GOOGLE_MODELS: KnownModel[] = [
 
 const GOOGLE_PATTERNS: Record<string, string> = {
   "gemini-3-pro": "Gemini 3 Pro(?! Image)",
-  "gemini-3-flash": "Gemini 3 Flash(?! Preview)",
+  "gemini-3-flash": "Gemini 3 Flash",
   "gemini-2.5-pro": "Gemini 2\\.5 Pro(?! Preview| Image)",
   "gemini-2.5-flash":
     "Gemini 2\\.5 Flash(?!-| Lite| Image| Preview| Native)",
