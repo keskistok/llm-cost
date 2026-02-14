@@ -98,33 +98,62 @@ const OPENAI_MODELS: KnownModel[] = [
   { id: "o3-mini", displayName: "o3 Mini", context: "200K" },
 ];
 
+/**
+ * Extract text from only the "Standard" tier tab panes.
+ *
+ * OpenAI's pricing page uses a content-switcher with four tiers
+ * (Batch, Flex, Standard, Priority). Each tier's data lives in a
+ * `<… data-content-switcher-pane … data-value="standard" …>` element.
+ * We pull out just those panes so we never accidentally read Batch or
+ * Priority prices.
+ */
+function extractStandardPanes(html: string): string {
+  const paneStarts = [
+    ...html.matchAll(
+      /data-content-switcher-pane[^>]*data-value="([^"]*)"[^>]*>/gi
+    ),
+  ];
+
+  let standardContent = "";
+  for (let i = 0; i < paneStarts.length; i++) {
+    if (paneStarts[i][1].toLowerCase() !== "standard") continue;
+    const start = paneStarts[i].index! + paneStarts[i][0].length;
+    const end =
+      i + 1 < paneStarts.length ? paneStarts[i + 1].index! : start + 5000;
+    standardContent += html.substring(start, end) + " ";
+  }
+  return standardContent;
+}
+
 function parseOpenAI(html: string): Model[] {
-  const text = stripHtml(html);
+  // Extract only the Standard tier panes from raw HTML, then strip tags.
+  // Fall back to the full page if the tab structure isn't found.
+  const standardHtml = extractStandardPanes(html);
+  const text = stripHtml(standardHtml.length > 100 ? standardHtml : html);
   const models: Model[] = [];
 
   for (const km of OPENAI_MODELS) {
-    // Escape dots in model IDs for regex
+    // Escape dots in model IDs for regex, then add a boundary so e.g.
+    // "gpt-5" doesn't match inside "gpt-5.2" or "gpt-5-mini".
     const escaped = km.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const modelRegex = new RegExp(escaped + "(?![\\w.-])", "i");
 
-    // Find the model name in text
-    const modelRegex = new RegExp(escaped, "i");
     const modelMatch = text.match(modelRegex);
     if (!modelMatch || modelMatch.index === undefined) continue;
 
-    // Grab a large window after the model name to reach the Standard tier
-    const afterModel = text.substring(
-      modelMatch.index,
-      modelMatch.index + 1200
+    // Limit the window to the next model name so we don't pick up
+    // another model's prices.
+    const rest = text.substring(modelMatch.index + 1);
+    const nextModel = rest.search(
+      /(?:gpt-\d|o\d(?:-| ))/i
     );
+    const windowEnd =
+      nextModel >= 0
+        ? modelMatch.index + 1 + nextModel
+        : modelMatch.index + 300;
+    const window = text.substring(modelMatch.index, windowEnd);
 
-    // OpenAI shows multiple tiers (Batch, Flex, Standard, Priority).
-    // We want Standard tier pricing — the default on-demand rate.
-    const standardIdx = afterModel.search(/\bstandard\b/i);
-    if (standardIdx < 0) continue;
-
-    // From "Standard", grab a window (before the next tier like "Priority")
-    const afterStandard = afterModel.substring(standardIdx, standardIdx + 250);
-    const priceMatches = [...afterStandard.matchAll(/\$([\d.]+)/g)];
+    const priceMatches = [...window.matchAll(/\$([\d.]+)/g)];
 
     // Expect 3 prices: input, cached input, output — take 1st and 3rd.
     // If only 2 prices (no cached), take 1st and 2nd.
