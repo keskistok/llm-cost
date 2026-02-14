@@ -1,10 +1,27 @@
-import { models, LAST_UPDATED } from "@/lib/pricing-data";
+import { models as staticModels, LAST_UPDATED } from "@/lib/pricing-data";
+import { scrapeAllPricing } from "@/lib/scraper";
 import PricingDashboard from "@/components/pricing-dashboard";
 
 // ISR: revalidate every hour
 export const revalidate = 3600;
 
-export default function Home() {
+export default async function Home() {
+  let displayModels = staticModels;
+  let lastUpdated = LAST_UPDATED;
+
+  try {
+    const result = await scrapeAllPricing();
+    if (result.models.length > 0) {
+      displayModels = result.models;
+      lastUpdated = new Date(result.scrapedAt).toLocaleDateString("en-US", {
+        month: "long",
+        year: "numeric",
+      });
+    }
+  } catch {
+    // Scraping failed — fall back to static data
+  }
+
   return (
     <div className="mx-auto min-h-screen max-w-5xl px-4 py-12 sm:px-6 lg:px-8">
       <header className="mb-10">
@@ -15,11 +32,11 @@ export default function Home() {
           Compare token costs across OpenAI, Anthropic, and Google models.
           <br />
           Prices per <strong>1 million tokens</strong> &mdash; last updated{" "}
-          {LAST_UPDATED}.
+          {lastUpdated}.
         </p>
       </header>
 
-      <PricingDashboard models={models} />
+      <PricingDashboard models={displayModels} />
 
       <footer className="mt-12 border-t border-zinc-200 pt-6 text-sm text-zinc-500 dark:border-zinc-800">
         <p>
